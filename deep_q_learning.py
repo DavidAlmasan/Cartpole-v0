@@ -5,7 +5,7 @@ import random
 
 import gym
 import tensorflow as tf
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import Adam, RMSprop
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras import datasets, layers, models
 
@@ -13,14 +13,14 @@ from tensorflow.keras import datasets, layers, models
 class DQN():
     def __init__(self):
         # Hyperparams
-        self.learning_rate = 0.1
+        self.learning_rate = 0.8
         self.gamma = 1
         self.batch_size = 256
 
         # Training params
         self.max_steps_per_episode = 500
         self.max_episodes = 200
-        self.memory = deque(maxlen=20000)
+        self.memory = deque(maxlen=2000)
 
         # Env and agent
         self.env = self.create_env()
@@ -50,22 +50,27 @@ class DQN():
         agent = models.Sequential()
         agent.add(layers.Input(4))
         agent.add(layers.Dense(32, activation='relu'))
-        # agent.add(layers.Dense(32, activation='relu'))
+        agent.add(layers.Dropout(0.3))
+        agent.add(layers.Dense(32, activation='relu'))
+        agent.add(layers.Dropout(0.3))
         agent.add(layers.Dense(2, activation='softmax'))
 
         target_agent = models.Sequential()
         target_agent.add(layers.Input(4))
         target_agent.add(layers.Dense(32, activation='relu'))
-        # target_agent.add(layers.Dense(32, activation='relu'))
+        target_agent.add(layers.Dropout(0.3))
+        target_agent.add(layers.Dense(32, activation='relu'))
+        target_agent.add(layers.Dropout(0.3))
         target_agent.add(layers.Dense(2, activation='softmax'))
 
-        optimizer = Adam(self.learning_rate)
+        optimizer = RMSprop(self.learning_rate)
 
         # agent.compile(loss='mse', optimizer=optimizer)
         return agent, target_agent, optimizer
 
     def epsilon_greedy(self, t, s):
-        eps = max(0.01, 1. / (t + 1))
+        eps = max(0.05, 1. / (t + 1))
+        # eps = 0.1
         s = np.expand_dims(np.asarray(s), axis=0)
         action_space = np.squeeze(self.agent(s).numpy())
         if eps <= np.random.uniform(0, 0.9999):
@@ -83,12 +88,13 @@ class DQN():
         self.memory.append((state, action, reward, next_state, done, eps))
 
     def train(self):
+        itx = 0
         for episode in range(self.max_episodes):
             print('Training at episode: {}'.format(episode + 1))
             s = self.env.reset()
             for t in range(self.max_steps_per_episode):
-                # Epsilon greedy with eps = 1/(t+1)
-                action, eps = self.epsilon_greedy(t, s)
+                # Epsilon greedy with eps = 1/(itx+1)
+                action, eps = self.epsilon_greedy(itx, s)
                 # self.env.render()
                 s_, r, d, _ = self.env.step(action)
                 self.remember(self.preprocess(s),
@@ -99,6 +105,7 @@ class DQN():
                 s = s_
 
                 self.train_step()
+                itx += 1
                 if d:
                     print('Episode length: {}'.format(t + 1))
                     break
@@ -129,6 +136,68 @@ class DQN():
 
         #     # Copy weights to target_agent
         self.target_agent.set_weights(self.agent.get_weights())
+
+
+class DoubleDQN(DQN):
+    def __init__(self):
+        super(DoubleDQN, self).__init__()
+
+    def epsilon_greedy(self, t, s):
+        eps = max(0.1, 1. / (t + 1))
+        # eps = 0.1
+        s = np.expand_dims(np.asarray(s), axis=0)
+        action_space = np.squeeze(self.agent(s).numpy() + self.target_agent(s).numpy())
+        if eps <= np.random.uniform(0, 0.9999):
+            # Perform explore action
+            action = np.random.choice(list(range(len(action_space))))
+        else:
+            # Perform greedy action
+            action = np.argmax(action_space)
+        return action, eps
+
+    def train_step(self):
+        batch_x, batch_y = [], []
+        batch_size = min(len(self.memory), self.batch_size)
+        mini_batch = random.sample(self.memory, batch_size)
+        if np.random.uniform(0, 0.999) < 0.5:
+            with tf.GradientTape() as tape:
+                for state, action, reward, next_state, done, eps in mini_batch:
+                    # q_table = self.target_agent.predict(state)[0]
+                    q_value = self.agent(state, training=True)[0][action]
+                    if done:
+                        q_target = reward
+                    else:
+                        q_target = tf.stop_gradient(reward + self.gamma * tf.reduce_max(self.target_agent(next_state)[0]))
+                    # q_table[action] = q_target
+                    batch_x.append(q_value)
+                    batch_y.append(q_target)
+                x = tf.stack(batch_x)
+                y = tf.stack(batch_y)
+
+                # loss = MeanSquaredError()(y, x) / 2
+                loss = tf.reduce_mean(tf.square(y - x)) / 2
+                grads = tape.gradient(loss, self.agent.trainable_variables)
+                self.optimizer.apply_gradients(zip(grads, self.agent.trainable_variables))
+        else:
+            with tf.GradientTape() as tape:
+                for state, action, reward, next_state, done, eps in mini_batch:
+                    # q_table = self.target_agent.predict(state)[0]
+                    q_value = self.target_agent(state, training=True)[0][action]
+                    if done:
+                        q_target = reward
+                    else:
+                        q_target = tf.stop_gradient(
+                            reward + self.gamma * tf.reduce_max(self.agent(next_state)[0]))
+                    # q_table[action] = q_target
+                    batch_x.append(q_value)
+                    batch_y.append(q_target)
+                x = tf.stack(batch_x)
+                y = tf.stack(batch_y)
+
+                # loss = MeanSquaredError()(y, x) / 2
+                loss = tf.reduce_mean(tf.square(y - x)) / 2
+                grads = tape.gradient(loss, self.target_agent.trainable_variables)
+                self.optimizer.apply_gradients(zip(grads, self.target_agent.trainable_variables))
 
 
 
@@ -163,7 +232,7 @@ def play(environment, policy=None, num_steps=1000):
 if __name__ == '__main__':
     weights_path = './weights'
     num_steps = 200
-    solver = DQN()
+    solver = DoubleDQN()
 
     # Load weights in
     # solver.update_agent_weights(weights_path)
