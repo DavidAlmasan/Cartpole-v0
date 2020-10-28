@@ -37,9 +37,8 @@ tensorboard-plugin-wit==1.7.0
 tensorflow==2.3.1
 tensorflow-estimator==2.3.0
 termcolor==1.1.0
-torch==1.6.0+cpu
-torchvision==0.7.0+cpu
 urllib3==1.25.11
 Werkzeug==1.0.1
 wrapt==1.12.1
 zipp==3.3.2
+tqdm~=4.51.0

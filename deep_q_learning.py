@@ -16,14 +16,14 @@ CUR = os.path.abspath(os.path.dirname(__file__))
 class DQN():  # TODO NORMALISE REWARDS OR STOP SOTFMAX ON AGENT
     def __init__(self):
         # Hyperparams
-        self.learning_rate = 0.8
+        self.learning_rate = 0.0001
         self.gamma = 1
-        self.batch_size = 256
+        self.batch_size = 128
 
         # Training params
         self.max_steps_per_episode = 500
         self.max_episodes = 500
-        self.memory = deque(maxlen=2000)
+        self.memory = deque(maxlen=20000)
 
         # Env and agent
         self.env = self.create_env()
@@ -146,8 +146,8 @@ class DoubleDQN(DQN):
         super(DoubleDQN, self).__init__()
 
     def epsilon_greedy(self, t, s):
-        eps = max(0.1, 1. / (t + 1))
-        # eps = 0.1
+        eps = 0.92 ** t
+        eps = max(0.01, eps)
         s = np.expand_dims(np.asarray(s), axis=0)
         action_space = np.squeeze(self.agent(s).numpy() + self.target_agent(s).numpy())
         if eps <= np.random.uniform(0, 0.9999):
@@ -170,15 +170,16 @@ class DoubleDQN(DQN):
                     if done:
                         q_target = reward
                     else:
-                        q_target = tf.stop_gradient(reward + self.gamma * tf.reduce_max(self.target_agent(next_state)[0]))
-                    # q_table[action] = q_target
+                        max_action = tf.argmax(self.target_agent(next_state)[0])
+                        q_target = tf.stop_gradient(reward + self.gamma * self.agent(next_state)[0, max_action])
                     batch_x.append(q_value)
                     batch_y.append(q_target)
                 x = tf.stack(batch_x)
                 y = tf.stack(batch_y)
 
                 # loss = MeanSquaredError()(y, x) / 2
-                loss = tf.reduce_mean(tf.square(y - x)) / 2
+                # loss = tf.reduce_mean(tf.square(y - x)) / 2
+                loss = tf.keras.losses.Huber(reduction=tf.keras.losses.Reduction.SUM)(y, x)
                 grads = tape.gradient(loss, self.agent.trainable_variables)
                 self.optimizer.apply_gradients(zip(grads, self.agent.trainable_variables))
         else:
@@ -189,8 +190,8 @@ class DoubleDQN(DQN):
                     if done:
                         q_target = reward
                     else:
-                        q_target = tf.stop_gradient(
-                            reward + self.gamma * tf.reduce_max(self.agent(next_state)[0]))
+                        max_action = tf.argmax(self.agent(next_state)[0])
+                        q_target = tf.stop_gradient(reward + self.gamma * self.target_agent(next_state)[0, max_action])
                     # q_table[action] = q_target
                     batch_x.append(q_value)
                     batch_y.append(q_target)
@@ -198,7 +199,8 @@ class DoubleDQN(DQN):
                 y = tf.stack(batch_y)
 
                 # loss = MeanSquaredError()(y, x) / 2
-                loss = tf.reduce_mean(tf.square(y - x)) / 2
+                # loss = tf.reduce_mean(tf.square(y - x)) / 2
+                loss = tf.keras.losses.Huber(reduction=tf.keras.losses.Reduction.SUM)(y, x)
                 grads = tape.gradient(loss, self.target_agent.trainable_variables)
                 self.optimizer.apply_gradients(zip(grads, self.target_agent.trainable_variables))
 

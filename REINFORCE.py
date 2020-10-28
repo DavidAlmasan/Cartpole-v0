@@ -14,12 +14,12 @@ from tensorflow.keras import datasets, layers, models
 class REINFORCE():
     def __init__(self):
         # Hyperparams
-        self.learning_rate = 1e-7
+        self.learning_rate = 1e-5
         self.gamma = 0.9999
 
         # Training params
         self.max_steps_per_episode = 500
-        self.max_episodes = 2000
+        self.max_episodes = 20000
         self.log_episodes = [int(float(self.max_episodes) * i / 10) for i in range(11)]
 
         # Env and agent
@@ -58,17 +58,34 @@ class REINFORCE():
 
         return states, actions, rewards
 
+    def epsilon_greedy(self, t, s):
+        eps = 0.92 ** t
+        eps = max(0.01, eps)
+        s = np.expand_dims(np.asarray(s), axis=0)
+        action_space = np.squeeze(self.policy(s).numpy())
+        if eps <= np.random.uniform(0, 0.9999):
+            # Perform explore action
+            action = np.random.choice(list(range(len(action_space))))
+        else:
+            # Perform greedy action
+            action = np.argmax(action_space)
+        return action
 
-
-    def store_episode(self, policy):
+    def store_episode(self, policy, use_eps=True):
         episode = []
         s = self.env.reset()
         d = False
+        t = 0
         while not d:
-            action = tf.argmax(policy(self.preprocess(s))[0]).numpy()
+            if use_eps:
+                action = self.epsilon_greedy(t, s)
+            else:
+                action = tf.argmax(policy(self.preprocess(s))[0]).numpy()
+
             s_, r, d, _ = self.env.step(action)
             episode.append([s, action, r])
             s = s_
+            t += 1
         states, actions, rewards = self.compute_cumulative_rewards(episode)
 
         return states, actions, rewards
@@ -83,12 +100,15 @@ class REINFORCE():
 
         with tf.GradientTape() as tape:
             q_space = tf.clip_by_value(tf.cast(self.policy(states, training=True), dtype=tf.float64),
-                                       clip_value_min = 0.0001,
-                                       clip_value_max = self.max_steps_per_episode)
+                                       clip_value_min=0.0001,
+                                       clip_value_max=self.max_steps_per_episode)
+            q_space_probs = tf.math.softmax(q_space, axis=-1)
             q_values = tf.gather_nd(q_space, actions)
-            gamma_vector = tf.cast(tf.convert_to_tensor([self.gamma ** i for i in range(len(q_space))]), dtype=tf.float64)
-            rewards = tf.math.multiply(rewards, gamma_vector)
-            loss = tf.math.multiply(tf.math.log(q_values),
+            q_values_probs = tf.gather_nd(q_space_probs, actions)
+            gamma_vector = tf.cast(tf.convert_to_tensor([self.gamma ** i for i in range(len(q_space))]),
+                                   dtype=tf.float64)
+            # rewards = tf.math.multiply(rewards, gamma_vector)
+            loss = tf.math.multiply(tf.math.log(q_values_probs),
                                     tf.stop_gradient(rewards))
             loss = tf.reduce_mean(loss) * -1
             # print('loss: ', loss)
