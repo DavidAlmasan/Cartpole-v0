@@ -1,4 +1,5 @@
 import sys, os
+from os.path import join
 import numpy as np
 from collections import deque
 import random
@@ -10,7 +11,9 @@ from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras import datasets, layers, models
 
 
-class DQN():
+CUR = os.path.abspath(os.path.dirname(__file__))
+
+class DQN():  # TODO NORMALISE REWARDS OR STOP SOTFMAX ON AGENT
     def __init__(self):
         # Hyperparams
         self.learning_rate = 0.8
@@ -19,7 +22,7 @@ class DQN():
 
         # Training params
         self.max_steps_per_episode = 500
-        self.max_episodes = 200
+        self.max_episodes = 500
         self.memory = deque(maxlen=2000)
 
         # Env and agent
@@ -53,7 +56,7 @@ class DQN():
         agent.add(layers.Dropout(0.3))
         agent.add(layers.Dense(32, activation='relu'))
         agent.add(layers.Dropout(0.3))
-        agent.add(layers.Dense(2, activation='softmax'))
+        agent.add(layers.Dense(2, activation='linear'))
 
         target_agent = models.Sequential()
         target_agent.add(layers.Input(4))
@@ -61,7 +64,7 @@ class DQN():
         target_agent.add(layers.Dropout(0.3))
         target_agent.add(layers.Dense(32, activation='relu'))
         target_agent.add(layers.Dropout(0.3))
-        target_agent.add(layers.Dense(2, activation='softmax'))
+        target_agent.add(layers.Dense(2, activation='linear'))
 
         optimizer = RMSprop(self.learning_rate)
 
@@ -230,7 +233,9 @@ def play(environment, policy=None, num_steps=1000):
 
 
 if __name__ == '__main__':
-    weights_path = './weights'
+
+    weights_path = join(CUR, './dqn_weights')
+    os.makedirs(weights_path, exist_ok=True)
     num_steps = 200
     solver = DoubleDQN()
 
