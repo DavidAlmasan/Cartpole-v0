@@ -102,12 +102,12 @@ class REINFORCE():
             q_space = tf.clip_by_value(tf.cast(self.policy(states, training=True), dtype=tf.float64),
                                        clip_value_min=0.0001,
                                        clip_value_max=self.max_steps_per_episode)
-            q_space_probs = tf.math.softmax(q_space, axis=-1)
+            q_space_probs = tf.nn.softmax(q_space)
             q_values = tf.gather_nd(q_space, actions)
             q_values_probs = tf.gather_nd(q_space_probs, actions)
             gamma_vector = tf.cast(tf.convert_to_tensor([self.gamma ** i for i in range(len(q_space))]),
                                    dtype=tf.float64)
-            # rewards = tf.math.multiply(rewards, gamma_vector)
+            rewards = tf.math.multiply(rewards, gamma_vector)
             loss = tf.math.multiply(tf.math.log(q_values_probs),
                                     tf.stop_gradient(rewards))
             loss = tf.reduce_mean(loss) * -1

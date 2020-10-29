@@ -13,21 +13,57 @@ from tensorflow.keras import datasets, layers, models
 
 CUR = os.path.abspath(os.path.dirname(__file__))
 
+class Agent(tf.keras.Model):
+    def __init__(self, space_size, hidden_units, action_size, dueling=True):
+        """Initialize."""
+        super(Agent, self).__init__()
+
+        self.inp = tf.keras.Input(shape=(space_size,))
+        self.fc_layers = [layers.Dense(units, activation="relu") for units in hidden_units]
+        self.value_head = layers.Dense(1)
+        self.advantage_head = layers.Dense(action_size)
+        self.dueling = dueling
+        if dueling:
+            print('Created dueling network')
+
+    def call(self, x):
+        # x = self.inp(inputs)
+        for fc_layer in self.fc_layers:
+            x = fc_layer(x)
+
+        if not self.dueling:
+            return self.advantage_head(x)  # Treat advantage head as q output
+
+        # Value and Advantage for dueling network
+        value = self.value_head(x)
+        advantage = self.advantage_head(x)
+
+        # Process advantage to be zero mean
+        advantage -= tf.math.reduce_mean(advantage, axis=-1)
+        value_tiled = tf.tile(value, tf.constant([1, 2]))
+        q_values = value_tiled + advantage
+
+        return q_values
+
+
 class DQN():  # TODO NORMALISE REWARDS OR STOP SOTFMAX ON AGENT
-    def __init__(self):
+    def __init__(self, use_dueling=True):
         # Hyperparams
-        self.learning_rate = 0.0001
+        self.learning_rate = 0.00015
         self.gamma = 1
         self.batch_size = 128
 
         # Training params
         self.max_steps_per_episode = 500
-        self.max_episodes = 500
+        self.max_episodes = 2000
         self.memory = deque(maxlen=20000)
 
         # Env and agent
         self.env = self.create_env()
-        self.agent, self.target_agent, self.optimizer = self.create_agent()
+        self.agent, self.target_agent, self.optimizer = self.create_agent(use_dueling)
+
+        # Misc
+        self.wait_episodes = 10
 
     def update_agent_weights(self, weights_path):
         self.agent.load_weights(weights_path)
@@ -49,30 +85,33 @@ class DQN():  # TODO NORMALISE REWARDS OR STOP SOTFMAX ON AGENT
     def save_agent(self, path):
         self.agent.save_weights(path)
 
-    def create_agent(self):
-        agent = models.Sequential()
-        agent.add(layers.Input(4))
-        agent.add(layers.Dense(32, activation='relu'))
-        agent.add(layers.Dropout(0.3))
-        agent.add(layers.Dense(32, activation='relu'))
-        agent.add(layers.Dropout(0.3))
-        agent.add(layers.Dense(2, activation='linear'))
+    def create_agent(self, use_dueling):
+        # agent = models.Sequential()
+        # agent.add(layers.Input(4))
+        # agent.add(layers.Dense(32, activation='relu'))
+        # agent.add(layers.Dropout(0.3))
+        # agent.add(layers.Dense(32, activation='relu'))
+        # agent.add(layers.Dropout(0.3))
+        # agent.add(layers.Dense(2, activation='linear'))
 
-        target_agent = models.Sequential()
-        target_agent.add(layers.Input(4))
-        target_agent.add(layers.Dense(32, activation='relu'))
-        target_agent.add(layers.Dropout(0.3))
-        target_agent.add(layers.Dense(32, activation='relu'))
-        target_agent.add(layers.Dropout(0.3))
-        target_agent.add(layers.Dense(2, activation='linear'))
+        # target_agent = models.Sequential()
+        # target_agent.add(layers.Input(4))
+        # target_agent.add(layers.Dense(32, activation='relu'))
+        # target_agent.add(layers.Dropout(0.3))
+        # target_agent.add(layers.Dense(32, activation='relu'))
+        # target_agent.add(layers.Dropout(0.3))
+        # target_agent.add(layers.Dense(2, activation='linear'))
 
-        optimizer = RMSprop(self.learning_rate)
+        agent = Agent(4, [32, 32], 2, use_dueling)
+        target_agent = Agent(4, [32, 32], 2, use_dueling)
+
+        optimizer = Adam(self.learning_rate)
 
         # agent.compile(loss='mse', optimizer=optimizer)
         return agent, target_agent, optimizer
 
     def epsilon_greedy(self, t, s):
-        eps = max(0.05, 1. / (t + 1))
+        eps = max(0.1, 0.95 ** t)
         # eps = 0.1
         s = np.expand_dims(np.asarray(s), axis=0)
         action_space = np.squeeze(self.agent(s).numpy())
@@ -90,9 +129,11 @@ class DQN():  # TODO NORMALISE REWARDS OR STOP SOTFMAX ON AGENT
     def remember(self, state, action, reward, next_state, done, eps):
         self.memory.append((state, action, reward, next_state, done, eps))
 
-    def train(self):
+    def train(self, save_path):
         itx = 0
+        losses = []
         for episode in range(self.max_episodes):
+            loss = 0.
             print('Training at episode: {}'.format(episode + 1))
             s = self.env.reset()
             for t in range(self.max_steps_per_episode):
@@ -106,12 +147,16 @@ class DQN():  # TODO NORMALISE REWARDS OR STOP SOTFMAX ON AGENT
                               self.preprocess(s_),
                               d, eps)
                 s = s_
-
-                self.train_step()
+                if episode >= self.wait_episodes:
+                    loss += self.train_step()
                 itx += 1
                 if d:
-                    print('Episode length: {}'.format(t + 1))
+                    losses.append(loss / (t + 1))
+                    print('Episode length: {} with loss {} '.format(t + 1, loss / (t + 1)))
                     break
+        with open(save_path, 'w') as loss_file:
+            for l in losses:
+                loss_file.write(str(l) + '\n')
         print('Finished training!')
 
     def train_step(self):
@@ -142,8 +187,8 @@ class DQN():  # TODO NORMALISE REWARDS OR STOP SOTFMAX ON AGENT
 
 
 class DoubleDQN(DQN):
-    def __init__(self):
-        super(DoubleDQN, self).__init__()
+    def __init__(self, use_dueling):
+        super(DoubleDQN, self).__init__(use_dueling)
 
     def epsilon_greedy(self, t, s):
         eps = 0.92 ** t
@@ -203,7 +248,9 @@ class DoubleDQN(DQN):
                 loss = tf.keras.losses.Huber(reduction=tf.keras.losses.Reduction.SUM)(y, x)
                 grads = tape.gradient(loss, self.target_agent.trainable_variables)
                 self.optimizer.apply_gradients(zip(grads, self.target_agent.trainable_variables))
+        loss = loss.numpy()
 
+        return loss
 
 
 def play(environment, policy=None, num_steps=1000):
@@ -235,17 +282,20 @@ def play(environment, policy=None, num_steps=1000):
 
 
 if __name__ == '__main__':
+    use_dueling_network = True
 
     weights_path = join(CUR, './dqn_weights')
+    save_file = join(CUR, 'loss.txt')
     os.makedirs(weights_path, exist_ok=True)
     num_steps = 200
-    solver = DoubleDQN()
 
+
+    # Instantiate the solver
+    solver = DoubleDQN(use_dueling_network)
     # Load weights in
     # solver.update_agent_weights(weights_path)
-
     # Train
-    solver.train()
+    solver.train(save_file)
     solver.save_agent(weights_path)
     agent = solver.get_agent()
     agent.load_weights(weights_path)
