@@ -10,33 +10,8 @@ from tensorflow.keras.optimizers import Adam, RMSprop
 from tensorflow.keras.losses import MeanSquaredError
 from tensorflow.keras import datasets, layers, models
 
+from agent import ActorCritic
 
-def env_step(action, env):
-    """Returns state, reward and done flag given an action."""
-
-    state, reward, done, _ = env.step(action)
-    return (state.astype(np.float32),
-            np.array(reward, np.int32),
-            np.array(done, np.int32))
-
-
-def tf_env_step(action, env):
-    return tf.numpy_function(env_step, [action, env],
-                             [tf.float32, tf.int32, tf.int32])
-
-
-class ActorCritic(tf.keras.Model):
-    def __init__(self, num_actions: int, num_hidden_units: int):
-        """Initialize."""
-        super(ActorCritic, self).__init__()
-
-        self.common = layers.Dense(num_hidden_units, activation="relu")
-        self.actor = layers.Dense(num_actions)
-        self.critic = layers.Dense(1)
-
-    def call(self, inputs):
-        x = self.common(inputs)
-        return self.actor(x), self.critic(x)
 
 
 class A2CSolver():
@@ -57,6 +32,19 @@ class A2CSolver():
         # loss
         self.huber_loss = tf.keras.losses.Huber(reduction=tf.keras.losses.Reduction.SUM)
 
+    def env_step(self, action):
+        """Returns state, reward and done flag given an action."""
+
+        state, reward, done, _ = self.env.step(action)
+
+        return (state.astype(np.float32),
+                np.array(reward, np.int32),
+                np.array(done, np.int32))
+
+    def tf_env_step(self, action):
+        return tf.numpy_function(self.env_step, [action],
+                                 [tf.float32, tf.int32, tf.int32])
+
     def preprocess(self, state):
         return np.expand_dims(state, axis=0)
 
@@ -69,7 +57,7 @@ class A2CSolver():
 
     def create_agent(self):
         agent = ActorCritic(2, 128)
-        optimizer = RMSprop(self.learning_rate)
+        optimizer = Adam(self.learning_rate)
 
         return agent, optimizer
 
@@ -89,8 +77,9 @@ class A2CSolver():
             # Sample action. idk why random and not eps greedy
             action = tf.random.categorical(action_space, 1)[0, 0]
 
+            print('ssss')
             # Apply action into env
-            state, reward, done, _ = tf_env_step(action, self.env)
+            state, reward, done, _ = self.tf_env_step(action)
 
             # Store critic values
             values = values.write(t, tf.squeeze(value))
@@ -142,7 +131,7 @@ class A2CSolver():
 
         return actor_loss + critic_loss
 
-    @tf.function
+    # @tf.function
     def train_step(self) -> tf.Tensor:
         """Runs a model training step."""
 
@@ -174,7 +163,7 @@ class A2CSolver():
         running_reward = 0
         with tqdm.trange(self.max_episodes) as t:
             for i in t:
-                episode_reward = int(self.train_step())
+                episode_reward = float(self.train_step())
 
                 running_reward = episode_reward * 0.01 + running_reward * .99
 

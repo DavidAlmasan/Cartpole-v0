@@ -1,6 +1,19 @@
 import tensorflow as tf
 from tensorflow.keras import layers
 
+class ActorCritic(tf.keras.Model):
+    def __init__(self, num_actions: int, num_hidden_units: int):
+        """Initialize."""
+        super(ActorCritic, self).__init__()
+
+        self.common = layers.Dense(num_hidden_units, activation="relu")
+        self.actor = layers.Dense(num_actions)
+        self.critic = layers.Dense(1)
+
+    def call(self, inputs):
+        x = self.common(inputs)
+        return self.actor(x), self.critic(x)
+
 
 class Agent(tf.keras.Model):
     def __init__(self, space_size, hidden_units, action_size, dueling=True):
@@ -26,9 +39,8 @@ class Agent(tf.keras.Model):
         # Value and Advantage for dueling network
         value = self.value_head(x)
         advantage = self.advantage_head(x)
-
         # Process advantage to be zero mean
-        advantage -= tf.math.reduce_mean(advantage, axis=-1)
+        advantage -= tf.math.reduce_mean(advantage, axis=-1, keepdims=True)
         value_tiled = tf.tile(value, tf.constant([1, 2]))
         q_values = value_tiled + advantage
 

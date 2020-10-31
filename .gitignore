@@ -2,3 +2,4 @@
 *.pyo
 weights.*
 checkpoint*
+*weights/
